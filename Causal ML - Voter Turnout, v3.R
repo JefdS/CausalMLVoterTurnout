@@ -607,6 +607,187 @@ colnames(voter.turnout.meas_individual.IE) <- c("Mediator","Ctf-IE Value","Ctf-I
 ### MEASURES USED FOR TABLE 3###
 voter.turnout.meas_individual.IE %>% arrange("Ctf-IE Value",decreasing=T)
 
+#### RUN MODEL - Set X, Y, Z and all significant mediators ####
+Y <- "voted" # outcome
+X <- "race.binary" # protected attribute
+Z <- c("gender","age","marital.status","sexual.orientation") # confounders
+W <-  c("education","employment","income","rural.urban.binary","religiousness",
+        "political.engagement.involvement.community","political.engagement.involvement.political",
+        "political.engagement.mobilization","political.engagement.discussion","LR.attitudes",
+        "democratic.norms.2","trust.politics","government.role.social","government.role.security","closeness.election") # mediators
+
+set.seed(2025)
+tvd.voter.turnout_significant.W <- fairness_cookbook(data = voter.turnout.data.scope, X = X, W = W, Z = Z, Y = Y, x0 = 0, x1 = 1,method = "medDML")
+voter.turnout.meas_significant.W <- summary(tvd.voter.turnout_significant.W)$measures 
+
+### MEASURES USED FOR TABLE 4###
+voter.turnout.meas_significant.W
+write_xlsx(voter.turnout.meas_significant.W,"voter.turnout.meas significant.W.xlsx")
+
+### PLOT USED FOR FIGURE 4###
+autoplot(tvd.voter.turnout_significant.W, decompose = "xspec",dataset = "Voter Turnout Data")
+
+
+
+#### RUN MODEL - Set X, Y, Z with build up of all significant mediators ####
+Y <- "voted" # outcome
+X <- "race.binary" # protected attribute
+Z <- c("gender","age","marital.status","sexual.orientation") # confounders
+W <-  c("education","employment","income","rural.urban.binary","religiousness",#"religion",
+        "political.engagement.involvement.community","political.engagement.involvement.political",
+        "political.engagement.mobilization","political.engagement.discussion","LR.attitudes",
+        "democratic.norms.2","trust.politics","government.role.social","government.role.security","closeness.election") # mediators
+W.label <- c("Education","Employment","Income","Rural/urban","Religiousness","Political engagement - community involvement",
+             "Political engagement - political involvement","Political engagement - mobilization","Political engagement - discussion",
+             "Left-right attitudes","Democratic norms","Trust in politics","Government role - social","Government role - security",
+             "Closeness of election")
+
+voter.turnout.meas_split.significant.W <- as.data.frame(voter.turnout.meas_significant.W)
+tvd.voter.turnout.significant.W <- as.data.frame(tvd.voter.turnout_significant.W$measures)
+voter.turnout.meas_split.significant.W$mediator <- "All"
+tvd.voter.turnout.significant.W$mediator <- "All"
+
+
+for (i in 1:length(W)) {
+  set.seed(2025)
+  W_temp <- W[1:i]
+  tvd.voter.turnout_temp <- fairness_cookbook(data = voter.turnout.data.scope, X = X, W = W_temp, Z = Z, Y = Y, x0 = 0, x1 = 1,method = "medDML")
+  voter.turnout.meas_temp <- summary(tvd.voter.turnout_temp)$measures
+  tvd.voter.turnout_boot <- tvd.voter.turnout_temp$measures
+  voter.turnout.meas_temp$mediator <- W.label[i]
+  tvd.voter.turnout_boot$mediator <- W.label[i]
+  voter.turnout.meas_split.significant.W <- rbind(voter.turnout.meas_split.significant.W,voter.turnout.meas_temp)
+  tvd.voter.turnout.significant.W <- rbind(tvd.voter.turnout.significant.W,tvd.voter.turnout_boot)
+  print(autoplot(tvd.voter.turnout_temp, decompose = "xspec",dataset = W[i]))
+}
+
+
+
+
+voter.turnout.meas_split.significant.W$mediator <- factor(voter.turnout.meas_split.significant.W$mediator, levels=c("Education","Employment","Income","Rural/urban","Religiousness","Political engagement - community involvement",
+                                                                                                                    "Political engagement - political involvement","Political engagement - mobilization","Political engagement - discussion",
+                                                                                                                    "Left-right attitudes","Democratic norms","Trust in politics","Government role - social","Government role - security",
+                                                                                                                    "Closeness of election","All"))
+tvd.voter.turnout.significant.W$mediator <- factor(voter.turnout.meas_split.significant.W$mediator, levels=c("Education","Employment","Income","Rural/urban","Religiousness","Political engagement - community involvement",
+                                                                                                             "Political engagement - political involvement","Political engagement - mobilization","Political engagement - discussion",
+                                                                                                             "Left-right attitudes","Democratic norms","Trust in politics","Government role - social","Government role - security",
+                                                                                                             "Closeness of election","All"))
+tvd.voter.turnout.bootstrap <- data.frame(matrix(ncol = 4, nrow = 0))
+colnames(tvd.voter.turnout.bootstrap) <- c("Mediator", "Measure", "Value", "SD")
+
+tvd.voter.turnout.bootstrap[1,"Mediator"] <- W.label[1]
+tvd.voter.turnout.bootstrap[1,"Measure"] <- "ctfie"
+tvd.voter.turnout.bootstrap[1,"Value"] <- mean(tvd.voter.turnout.significant.W[tvd.voter.turnout.significant.W$mediator == "Education" & tvd.voter.turnout.significant.W$measure == "ctfie",]$value)
+
+
+for (i in 2:(length( W.label))) {
+  tvd.voter.turnout.bootstrap[i,"Mediator"] <- W.label[i]
+  tvd.voter.turnout.bootstrap[i,"Measure"] <- "ctfie"
+  tvd.voter.turnout.bootstrap[i,"Value"] <- mean(tvd.voter.turnout.significant.W[tvd.voter.turnout.significant.W$mediator == W.label[i] &
+                                                                                   tvd.voter.turnout.significant.W$measure == "ctfie",]$value -
+                                                   tvd.voter.turnout.significant.W[tvd.voter.turnout.significant.W$mediator == W.label[i-1] &
+                                                                                     tvd.voter.turnout.significant.W$measure == "ctfie",]$value)
+}
+
+voter.turnout.meas_split.significant.W <- voter.turnout.meas_split.significant.W %>% filter(mediator != "All")
+
+### PLOT USED FOR FIGURE 5###
+# Line plot with error bars
+ggplot(voter.turnout.meas_split.significant.W[voter.turnout.meas_split.significant.W$measure %in% c("ctfde","ctfie","ctfse","tv"),], aes(x = mediator, y = abs(value), color = measure, group = measure)) +
+  geom_line(data = subset(voter.turnout.meas_split.significant.W, measure %in% c("ctfde", "ctfie")), size = 1.06) +
+  geom_line(data = subset(voter.turnout.meas_split.significant.W, measure %in% c("ctfse", "tv")), size = 0.53) +
+  geom_point() +  # Points on the lines
+  geom_errorbar(aes(ymin = abs(value) - 2*sd, ymax = abs(value) + 2*sd), width = 0.3) +  # Error bars
+  labs( x = "Mediator", y = "Effect Measure") +
+  scale_x_discrete(guide = guide_axis(angle = 45)) +
+  scale_color_manual(
+    values = c(
+      "ctfde" = "#7CAE00",
+      "ctfie" = "#3FBFC4",
+      "ctfse" = "#C87CFF",
+      "tv"    = "#F7766C"
+    ),
+    labels = c(
+      "ctfde" = "Ctf-DE",
+      "ctfie" = "Ctf-IE",
+      "ctfse" = "Ctf-SE",
+      "tv"    = "TV"
+    )
+  ) +
+  theme_minimal()
+
+
+# Stacked barplot 
+ggplot(
+  voter.turnout.meas_split.significant.W[
+    voter.turnout.meas_split.significant.W$measure %in% c("ctfde", "ctfie", "ctfse"),
+  ],
+  aes(x = mediator, y = abs(value), fill = measure)
+) +
+  geom_bar(stat = "identity", position = "stack") +  # Stacked bars
+  scale_fill_manual(
+    values = c(
+      "ctfde" = "#7CAE00",
+      "ctfie" = "#3FBFC4",
+      "ctfse" = "#C87CFF"
+    )
+  ) +
+  labs(x = "Mediator", y = "Effect Measure") +
+  scale_x_discrete(guide = guide_axis(angle = 45)) +
+  theme_minimal()
+
+write_xlsx(voter.turnout.meas_split.significant.W,"voter.turnout.meas split significant.W.xlsx")
+
+#### Distribution of confounders in function of race ####
+
+### PLOT USED FOR FIGURE 6A###
+# Age vs race
+ggplot(voter.turnout.data.scope, aes(x = age, fill = race.binary)) +
+  geom_density(alpha = 0.4) + theme_bw() +
+  theme(
+    legend.position = c(0.8, 0.8),
+    legend.box.background = element_rect()
+  ) + 
+  labs(fill = "Race/ethnicity") +
+  scale_fill_manual(values = c("0" =  "#F7766C", "1" ="#3FBFC4"),
+                    labels = c("Non-white", "White")) 
+
+### PLOT USED FOR FIGURE 6B###
+# Test age independent of race. Hypothesis is rejected (-values ). However, possible confounders of this relationship are not measured in the corresponding dataset.
+wilcox.test(voter.turnout.data.scope[voter.turnout.data.scope$race.binary == 1, ]$age, 
+            voter.turnout.data.scope[voter.turnout.data.scope$race.binary == 0, ]$age)
+
+# gender vs race
+ggplot(voter.turnout.data.scope, aes(x = gender, fill = race.binary)) +
+  geom_bar(position = "fill") +
+  geom_text(
+    aes(label = percent(round(after_stat(count)/tapply(after_stat(count), after_stat(x), sum)[after_stat(x)], 4))),
+    stat = "count", position = position_fill(0.5)
+  ) +
+  scale_y_continuous(labels = percent) + ylab("proportion") +
+  labs(fill = "Race/ethnicity") +
+  scale_fill_manual(values = c("0" =  "#F7766C", "1" ="#3FBFC4"),
+                    labels = c("Non-white", "White")) +
+  theme_minimal() 
+
+# Test gender independent of race. Hypothesis is failed to be rejected (-values ).
+wilcox.test(as.numeric(voter.turnout.data.scope[voter.turnout.data.scope$race.binary == 1, ]$gender),
+            as.numeric(voter.turnout.data.scope[voter.turnout.data.scope$race.binary == 0, ]$gender))
+
+TV_race.gender.1 <- mean(voter.turnout.data.scope$voted[voter.turnout.data.scope$gender == 1 & voter.turnout.data.scope$race.binary == 1],na.rm=TRUE) -
+  mean(voter.turnout.data.scope$voted[voter.turnout.data.scope$gender == 1 & voter.turnout.data.scope$race.binary == 0],na.rm=TRUE)
+TV_race.gender.1
+
+TV_race.gender.0 <- mean(voter.turnout.data.scope$voted[voter.turnout.data.scope$gender == 0 & voter.turnout.data.scope$race.binary == 1],na.rm=TRUE) -
+  mean(voter.turnout.data.scope$voted[voter.turnout.data.scope$gender == 0 & voter.turnout.data.scope$race.binary == 0],na.rm=TRUE)
+TV_race.gender.0
+
+fair_pred <- fair_predictions(voter.turnout.data.scope, X, Z, W, Y, x0 = "Non-white", x1 = "White")
+
+
+
+
+
 #### RUN MODEL - Set X, Y, Z and add education --> significant standalone IE ####
 W <- c("education") # mediators
 
@@ -764,9 +945,9 @@ autoplot(tvd.voter.turnout_party.identification, decompose = "xspec",dataset = "
 
 #### RUN MODEL - Set X, Y, Z and add democratic.norms.1 (Media) --> not significant standalone IE, but democratic.norms.2 is significant ####
 W <- c("education","employment","income","rural.urban.binary","religion","religiousness",
-             "political.engagement.involvement.community","political.engagement.involvement.political",
-             "political.engagement.mobilization","political.engagement.discussion","LR.attitudes",
-             "party.identification","democratic.norms.1") # mediators
+       "political.engagement.involvement.community","political.engagement.involvement.political",
+       "political.engagement.mobilization","political.engagement.discussion","LR.attitudes",
+       "party.identification","democratic.norms.1") # mediators
 
 set.seed(2025)
 tvd.voter.turnout_democratic.norms.1 <- fairness_cookbook(data = voter.turnout.data.scope, X = X, W = W, Z = Z, Y = Y, x0 = 0, x1 = 1,method = "medDML")
@@ -779,9 +960,9 @@ autoplot(tvd.voter.turnout_democratic.norms.1, decompose = "xspec",dataset = "Vo
 
 #### RUN MODEL - Set X, Y, Z and add democratic.norms.2 (Government) --> significant standalone IE ####
 W <- c("education","employment","income","rural.urban.binary","religion","religiousness",
-             "political.engagement.involvement.community","political.engagement.involvement.political",
-             "political.engagement.mobilization","political.engagement.discussion","LR.attitudes",
-             "party.identification","democratic.norms.1","democratic.norms.2") # mediators
+       "political.engagement.involvement.community","political.engagement.involvement.political",
+       "political.engagement.mobilization","political.engagement.discussion","LR.attitudes",
+       "party.identification","democratic.norms.1","democratic.norms.2") # mediators
 
 set.seed(2025)
 tvd.voter.turnout_democratic.norms.2 <- fairness_cookbook(data = voter.turnout.data.scope, X = X, W = W, Z = Z, Y = Y, x0 = 0, x1 = 1,method = "medDML")
@@ -794,9 +975,9 @@ autoplot(tvd.voter.turnout_democratic.norms.2, decompose = "xspec",dataset = "Vo
 
 #### RUN MODEL - Set X, Y, Z and add trust.politics --> significant standalone IE ####
 W <- c("education","employment","income","rural.urban.binary","religion","religiousness",
-             "political.engagement.involvement.community","political.engagement.involvement.political",
-             "political.engagement.mobilization","political.engagement.discussion","LR.attitudes",
-             "party.identification","democratic.norms.1","democratic.norms.2","trust.politics") # mediators
+       "political.engagement.involvement.community","political.engagement.involvement.political",
+       "political.engagement.mobilization","political.engagement.discussion","LR.attitudes",
+       "party.identification","democratic.norms.1","democratic.norms.2","trust.politics") # mediators
 
 set.seed(2025)
 tvd.voter.turnout_trust.politics <- fairness_cookbook(data = voter.turnout.data.scope, X = X, W = W, Z = Z, Y = Y, x0 = 0, x1 = 1,method = "medDML")
@@ -809,7 +990,7 @@ autoplot(tvd.voter.turnout_trust.politics, decompose = "xspec",dataset = "Voter 
 
 #### RUN MODEL - Set X, Y, Z and add government.role.social --> significant standalone IE ####
 W <-  c(
-              "government.role.social") # mediators
+  "government.role.social") # mediators
 
 set.seed(2025)
 tvd.voter.turnout_government.role.social <- fairness_cookbook(data = voter.turnout.data.scope, X = X, W = W, Z = Z, Y = Y, x0 = 0, x1 = 1,method = "medDML")
@@ -854,10 +1035,10 @@ autoplot(tvd.voter.turnout_engagement.campaigns, decompose = "xspec",dataset = "
 
 #### RUN MODEL - Set X, Y, Z and add closeness.election --> significant standalone IE ####
 W <-  c("education","employment","income","rural.urban.binary","religion","religiousness",
-             "political.engagement.involvement.community","political.engagement.involvement.political",
-             "political.engagement.mobilization","political.engagement.discussion","LR.attitudes",
-             "party.identification","democratic.norms.1","democratic.norms.2","trust.politics",
-             "government.role.social","government.role.security","engagement.campaigns","closeness.election") # mediators
+        "political.engagement.involvement.community","political.engagement.involvement.political",
+        "political.engagement.mobilization","political.engagement.discussion","LR.attitudes",
+        "party.identification","democratic.norms.1","democratic.norms.2","trust.politics",
+        "government.role.social","government.role.security","engagement.campaigns","closeness.election") # mediators
 
 set.seed(2025)
 tvd.voter.turnout_closeness.election <- fairness_cookbook(data = voter.turnout.data.scope, X = X, W = W, Z = Z, Y = Y, x0 = 0, x1 = 1,method = "medDML")
@@ -867,137 +1048,6 @@ voter.turnout.meas_closeness.election
 write_xlsx(voter.turnout.meas_engagement.campaigns,"voter.turnout.meas engagement.campaigns.xlsx")
 
 autoplot(tvd.voter.turnout_closeness.election, decompose = "xspec",dataset = "Voter Turnout Data - add closeness.election")
-
-#### RUN MODEL - Set X, Y, Z and all significant mediators ####
-Y <- "voted" # outcome
-X <- "race.binary" # protected attribute
-Z <- c("gender","age","marital.status","sexual.orientation") # confounders
-W <-  c("education","employment","income","rural.urban.binary","religiousness",
-        "political.engagement.involvement.community","political.engagement.involvement.political",
-        "political.engagement.mobilization","political.engagement.discussion","LR.attitudes",
-        "democratic.norms.2","trust.politics","government.role.social","government.role.security","closeness.election") # mediators
-
-set.seed(2025)
-tvd.voter.turnout_significant.W <- fairness_cookbook(data = voter.turnout.data.scope, X = X, W = W, Z = Z, Y = Y, x0 = 0, x1 = 1,method = "medDML")
-voter.turnout.meas_significant.W <- summary(tvd.voter.turnout_significant.W)$measures 
-
-### MEASURES USED FOR TABLE 4###
-voter.turnout.meas_significant.W
-write_xlsx(voter.turnout.meas_significant.W,"voter.turnout.meas significant.W.xlsx")
-
-### PLOT USED FOR FIGURE 4###
-autoplot(tvd.voter.turnout_significant.W, decompose = "xspec",dataset = "Voter Turnout Data")
-
-
-
-#### RUN MODEL - Set X, Y, Z with build up of all significant mediators ####
-Y <- "voted" # outcome
-X <- "race.binary" # protected attribute
-Z <- c("gender","age","marital.status","sexual.orientation") # confounders
-W <-  c("education","employment","income","rural.urban.binary","religiousness",#"religion",
-        "political.engagement.involvement.community","political.engagement.involvement.political",
-        "political.engagement.mobilization","political.engagement.discussion","LR.attitudes",
-        "democratic.norms.2","trust.politics","government.role.social","government.role.security","closeness.election") # mediators
-W.label <- c("Education","Employment","Income","Rural/urban","Religiousness","Political engagement - community involvement",
-             "Political engagement - political involvement","Political engagement - mobilization","Political engagement - discussion",
-             "Left-right attitudes","Democratic norms","Trust in politics","Government role - social","Government role - security",
-             "Closeness of election")
-
-voter.turnout.meas_split.significant.W <- as.data.frame(voter.turnout.meas_significant.W)
-tvd.voter.turnout.significant.W <- as.data.frame(tvd.voter.turnout_significant.W$measures)
-voter.turnout.meas_split.significant.W$mediator <- "All"
-tvd.voter.turnout.significant.W$mediator <- "All"
-
-
-for (i in 1:length(W)) {
-  set.seed(2025)
-  W_temp <- W[1:i]
-  tvd.voter.turnout_temp <- fairness_cookbook(data = voter.turnout.data.scope, X = X, W = W_temp, Z = Z, Y = Y, x0 = 0, x1 = 1,method = "medDML")
-  voter.turnout.meas_temp <- summary(tvd.voter.turnout_temp)$measures
-  tvd.voter.turnout_boot <- tvd.voter.turnout_temp$measures
-  voter.turnout.meas_temp$mediator <- W.label[i]
-  tvd.voter.turnout_boot$mediator <- W.label[i]
-  voter.turnout.meas_split.significant.W <- rbind(voter.turnout.meas_split.significant.W,voter.turnout.meas_temp)
-  tvd.voter.turnout.significant.W <- rbind(tvd.voter.turnout.significant.W,tvd.voter.turnout_boot)
-  print(autoplot(tvd.voter.turnout_temp, decompose = "xspec",dataset = W[i]))
-}
-
-
-
-
-voter.turnout.meas_split.significant.W$mediator <- factor(voter.turnout.meas_split.significant.W$mediator, levels=c("Education","Employment","Income","Rural/urban","Religiousness","Political engagement - community involvement",
-                                                                                                                    "Political engagement - political involvement","Political engagement - mobilization","Political engagement - discussion",
-                                                                                                                    "Left-right attitudes","Democratic norms","Trust in politics","Government role - social","Government role - security",
-                                                                                                                    "Closeness of election","All"))
-tvd.voter.turnout.significant.W$mediator <- factor(voter.turnout.meas_split.significant.W$mediator, levels=c("Education","Employment","Income","Rural/urban","Religiousness","Political engagement - community involvement",
-                                                                                                             "Political engagement - political involvement","Political engagement - mobilization","Political engagement - discussion",
-                                                                                                             "Left-right attitudes","Democratic norms","Trust in politics","Government role - social","Government role - security",
-                                                                                                             "Closeness of election","All"))
-tvd.voter.turnout.bootstrap <- data.frame(matrix(ncol = 4, nrow = 0))
-colnames(tvd.voter.turnout.bootstrap) <- c("Mediator", "Measure", "Value", "SD")
-
-tvd.voter.turnout.bootstrap[1,"Mediator"] <- W.label[1]
-tvd.voter.turnout.bootstrap[1,"Measure"] <- "ctfie"
-tvd.voter.turnout.bootstrap[1,"Value"] <- mean(tvd.voter.turnout.significant.W[tvd.voter.turnout.significant.W$mediator == "Education" & tvd.voter.turnout.significant.W$measure == "ctfie",]$value)
-
-
-for (i in 2:(length( W.label))) {
-  tvd.voter.turnout.bootstrap[i,"Mediator"] <- W.label[i]
-  tvd.voter.turnout.bootstrap[i,"Measure"] <- "ctfie"
-  tvd.voter.turnout.bootstrap[i,"Value"] <- mean(tvd.voter.turnout.significant.W[tvd.voter.turnout.significant.W$mediator == W.label[i] &
-                                                                                   tvd.voter.turnout.significant.W$measure == "ctfie",]$value -
-                                                   tvd.voter.turnout.significant.W[tvd.voter.turnout.significant.W$mediator == W.label[i-1] &
-                                                                                     tvd.voter.turnout.significant.W$measure == "ctfie",]$value)
-}
-
-voter.turnout.meas_split.significant.W <- voter.turnout.meas_split.significant.W %>% filter(mediator != "All")
-
-### PLOT USED FOR FIGURE 5###
-# Line plot with error bars
-ggplot(voter.turnout.meas_split.significant.W[voter.turnout.meas_split.significant.W$measure %in% c("ctfde","ctfie","ctfse","tv"),], aes(x = mediator, y = abs(value), color = measure, group = measure)) +
-  geom_line(data = subset(voter.turnout.meas_split.significant.W, measure %in% c("ctfde", "ctfie")), size = 1.06) +
-  geom_line(data = subset(voter.turnout.meas_split.significant.W, measure %in% c("ctfse", "tv")), size = 0.53) +
-  geom_point() +  # Points on the lines
-  geom_errorbar(aes(ymin = abs(value) - 2*sd, ymax = abs(value) + 2*sd), width = 0.3) +  # Error bars
-  labs( x = "Mediator", y = "Effect Measure") +
-  scale_x_discrete(guide = guide_axis(angle = 45)) +
-  scale_color_manual(
-    values = c(
-      "ctfde" = "#7CAE00",
-      "ctfie" = "#3FBFC4",
-      "ctfse" = "#C87CFF",
-      "tv"    = "#F7766C"
-    ),
-    labels = c(
-      "ctfde" = "Ctf-DE",
-      "ctfie" = "Ctf-IE",
-      "ctfse" = "Ctf-SE",
-      "tv"    = "TV"
-    )
-  ) +
-  theme_minimal()
-
-
-# Stacked barplot 
-ggplot(
-  voter.turnout.meas_split.significant.W[
-    voter.turnout.meas_split.significant.W$measure %in% c("ctfde", "ctfie", "ctfse"),
-  ],
-  aes(x = mediator, y = abs(value), fill = measure)
-) +
-  geom_bar(stat = "identity", position = "stack") +  # Stacked bars
-  scale_fill_manual(
-    values = c(
-      "ctfde" = "#7CAE00",
-      "ctfie" = "#3FBFC4",
-      "ctfse" = "#C87CFF"
-    )
-  ) +
-  labs(x = "Mediator", y = "Effect Measure") +
-  scale_x_discrete(guide = guide_axis(angle = 45)) +
-  theme_minimal()
-
-write_xlsx(voter.turnout.meas_split.significant.W,"voter.turnout.meas split significant.W.xlsx")
 
 #### RUN MODEL - Set X, Y, Z and W with all mediators; compare white with black respondents ####
 Y <- "voted" # outcome
@@ -1068,56 +1118,6 @@ voter.turnout.meas_multiple  <- summary(tvd.voter.turnout_multiple)$measures
 voter.turnout.meas_multiple
 
 autoplot(tvd.voter.turnout_multiple , decompose = "xspec",dataset = "Voter Turnout Data - White vs Multiple races")
-
-
-
-
-#### Distribution of confounders in function of race ####
-
-### PLOT USED FOR FIGURE 6A###
-# Age vs race
-ggplot(voter.turnout.data.scope, aes(x = age, fill = race.binary)) +
-  geom_density(alpha = 0.4) + theme_bw() +
-  theme(
-    legend.position = c(0.8, 0.8),
-    legend.box.background = element_rect()
-  ) + 
-  labs(fill = "Race/ethnicity") +
-  scale_fill_manual(values = c("0" =  "#F7766C", "1" ="#3FBFC4"),
-                    labels = c("Non-white", "White")) 
-
-### PLOT USED FOR FIGURE 6B###
-# Test age independent of race. Hypothesis is rejected (-values ). However, possible confounders of this relationship are not measured in the corresponding dataset.
-wilcox.test(voter.turnout.data.scope[voter.turnout.data.scope$race.binary == 1, ]$age, 
-            voter.turnout.data.scope[voter.turnout.data.scope$race.binary == 0, ]$age)
-
-# gender vs race
-ggplot(voter.turnout.data.scope, aes(x = gender, fill = race.binary)) +
-  geom_bar(position = "fill") +
-  geom_text(
-    aes(label = percent(round(after_stat(count)/tapply(after_stat(count), after_stat(x), sum)[after_stat(x)], 4))),
-    stat = "count", position = position_fill(0.5)
-  ) +
-  scale_y_continuous(labels = percent) + ylab("proportion") +
-  labs(fill = "Race/ethnicity") +
-  scale_fill_manual(values = c("0" =  "#F7766C", "1" ="#3FBFC4"),
-                    labels = c("Non-white", "White")) +
-  theme_minimal() 
-
-# Test gender independent of race. Hypothesis is failed to be rejected (-values ).
-wilcox.test(as.numeric(voter.turnout.data.scope[voter.turnout.data.scope$race.binary == 1, ]$gender),
-            as.numeric(voter.turnout.data.scope[voter.turnout.data.scope$race.binary == 0, ]$gender))
-
-TV_race.gender.1 <- mean(voter.turnout.data.scope$voted[voter.turnout.data.scope$gender == 1 & voter.turnout.data.scope$race.binary == 1],na.rm=TRUE) -
-  mean(voter.turnout.data.scope$voted[voter.turnout.data.scope$gender == 1 & voter.turnout.data.scope$race.binary == 0],na.rm=TRUE)
-TV_race.gender.1
-
-TV_race.gender.0 <- mean(voter.turnout.data.scope$voted[voter.turnout.data.scope$gender == 0 & voter.turnout.data.scope$race.binary == 1],na.rm=TRUE) -
-  mean(voter.turnout.data.scope$voted[voter.turnout.data.scope$gender == 0 & voter.turnout.data.scope$race.binary == 0],na.rm=TRUE)
-TV_race.gender.0
-
-fair_pred <- fair_predictions(voter.turnout.data.scope, X, Z, W, Y, x0 = "Non-white", x1 = "White")
-
 
 
 
